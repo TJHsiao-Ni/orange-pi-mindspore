@@ -1,0 +1,760 @@
+# <center>昇思+昇腾开发板：</center>
+
+# <center>软硬结合玩转DeepSeek开发实战</center>
+
+本教程将介绍如何在以香橙派为代表的昇腾开发板上，使用DeepSeek-R1-Distill-Qwen-1.5B模型，基于昇思MindSpore进行动态图开发，包括环境准备、模型开发、模型微调、模型推理、推理性能优化全流程。
+
+- [环境准备](#一-环境准备)
+  - [镜像烧录及CANN和MindSpore的升级](#1-镜像烧录及cann和mindspore的升级)
+  - [Swap检查与配置](#2-swap检查与配置)
+  - [Gradio安装](#3-gradio安装)
+- [模型开发](#二-模型开发)
+    - [验证环境准备](#1-验证环境准备)
+    - [执行ut进行验证](#2-执行ut进行验证)
+    - [报错分析](#3-报错分析) 
+- [模型微调](#三-模型微调)
+  - [背景介绍](#1-背景介绍)
+  - [微调实践](#2-微调实践)
+- [模型推理](#四-模型推理)
+  - [实验环境](#1-实验环境)
+  - [设置环境变量并启动推理](#2-设置环境变量并启动推理)
+  - [推理对话](#3-推理对话)
+  - [禁用多线程](#4-禁用多线程)
+  - [体验Lora微调后的效果](#5-体验lora微调后的效果)
+- [推理jit优化](#五-推理jit优化)
+  - [实验环境](#1-实验环境-1)
+  - [执行推理测试](#2-执行推理测试)
+  - [性能测试结果](#3-性能测试结果)
+- [附录](#附录)
+  - [报错信息汇总以及修改方案](#1-报错信息汇总以及修改方案)
+
+<div style="page-break-after: always;"></div>
+
+## 一、环境准备
+
+首先是环境准备，本章节将介绍如何在OrangePi AIpro-20t上烧录镜像，通过PC远程连接昇腾开发板配置运行环境，并自定义安装CANN和MindSpore。
+
+本章节所需的软/硬件如下：
+
+- 硬件：OrangePi AIpro-20t规格昇腾开发板、PC（个人笔记本电脑）、电源线、HDMI线、显示器、鼠标、键盘、读卡器、USB Type-C 数据线（可选）
+- 软件：balenaEtcher制卡工具、Vscode、MobaXterm（可选）
+
+OrangePi AIpro-20t规格昇腾开发板参考图：
+<div align="center">
+	<img src="./images/1_1_1_0.png" width="500" />
+</div>
+
+### 1. 镜像烧录及CANN和MindSpore的升级
+
+请参考[昇思官网香橙派环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.6.0/orange_pi/environment_setup.html)
+
+### 2. Swap检查与配置
+
+因为本实验需要的内存较大，请设置16G大小的Swap，否则在运行过程中可能会出现内存不足的情况。
+
+打开终端，输入如下命令，检查Swap是否开启：
+
+```bash
+# 使用下列命令查看Swap大小，如已配置16G Swap，则无需再次配置
+free -m
+```
+
+正确输出结果为：
+![2.1.1-swap](./images/2-swap.png)
+
+如输出的结果中Swap部分为0，则可在终端中输入如下命令，配置Swap:
+> 此为一次性操作。
+
+```bash
+# 以下命令配置swap 16G，sudo密码为Mind@123
+sudo fallocate -l 16G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+完成配置后可再通过`free -m`检查配置是否生效。
+
+### 3. Gradio安装
+
+打开终端，输入如下命令，安装Gradio 4.44.0
+```bash
+pip uninstall gradio -y
+pip install gradio==4.44.0
+```
+
+<div style="page-break-after: always;"></div>
+
+## 二、模型开发
+
+本章节将介绍已在云侧完成适配的前提下，如何在香橙派开发板上适配Qwen2模型。
+
+当前MindSpore NLP 0.4分支已经支持Qwen2模型，模型位于mindnlp/transformers/models/qwen2目录下。**如开发者想体验在开发板上的模型适配过程，可从MindSpore NLP 0.4.1的tag拉取代码，如果想直接从模型微调推理入手实践，可以跳过本章节。**
+
+
+### 1. 验证环境准备
+
+将MindSpore NLP v0.4.1 Tag克隆到本地：
+
+```bash
+git clone -b v0.4.1 https://github.com/mindspore-lab/mindnlp.git 
+```
+
+如克隆遇到网络问题，可更改为以下命令：
+
+```bash
+git clone -b v0.4.1 https://gitee.com/mindspore-lab/mindnlp.git
+```
+
+依赖安装
+
+```bash
+pip install -r requirements/requirements.txt
+```
+
+
+### 2. 执行ut进行验证
+
+设置环境变量：
+
+```bash
+export RUN_SLOW=True
+```
+
+执行命令：
+
+```bash
+pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
+```
+
+出现报错不准的时候, 为了精准定位, 在文件tests/transformers/models/qwen2/test_modeling_qwen2.py的import mindspore之后的位置，加入如下代码，重新跑pytest，查看具体的报错位置并根据报错信息修改
+
+```bash
+mindspore.set_context(pynative_synchronize=True)
+```
+
+### 3. 报错分析
+
+在执行ut后可能会遇到报错，下面针对三个典型的报错进行分析修改，其他具体报错汇总详见[附录](#附录)。
+
+#### 3.1 针对算子缺失报错进行分析处理
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_new_cache_format_0，报错信息如下：
+
+![图片60.png](./images/图片60.png)
+
+**分析：** OrangePi AIpro开发板当前CANN版本不支持aclnn的cumsum，切换成aclop算子进行执行，Tensor.cumsum => ops.cumsum(input, dim, dtype=None) , 且注意其中的input不支持int64，要通过int()转换为int32
+
+- 修改前代码：mindnlp\transformers\models\qwen2\modeling_qwen2.py
+
+![图片61.png](./images/图片61.png)
+
+- 修改后代码：
+
+![图片62.png](./images/图片62.png)
+
+
+#### 3.2 针对损失函数报错进行分析处理
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_Qwen2_sequence_classification_model，报错信息如下：
+
+![图片66.png](./images/图片66.png)
+
+**分析：** OrangePi AIpro开发板当前CANN版本不支持CrossEntropyLoss，需要修改成支持的mindspore.ops.SoftmaxCrossEntropyWithLogits接口。mindspore.ops.SoftmaxCrossEntropyWithLogits使用one-hot编码获取预测值和真实之间的softmax交叉熵，并且要求输入的预测值和真实值的数据类型相同。同时因为CrossEntropyLoss默认计算输出元素的加权平均值，所以最后计算输出loss的加权平均值。
+
+- 修改前代码：mindnlp\transformers\models\qwen2\modeling_qwen2.py
+
+<div align="center">
+    <img src="./images/图片67.png" width=450/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片68.png" width=450/>
+</div>
+
+#### 3.3 针对香橙派上Tensor索引/切片报错进行分析处理
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_beam_search_generate_dict_outputs_use_cache，报错信息如下：
+
+<div align="center">
+    <img src="./images/图片77.png" width=550/>
+</div>
+
+**分析：** OrangePi AIpro开发板上Tensor的切片赋值目前只支持直接通过mindspore.Tensor的方式
+
+- 修改前代码： mindnlp\transformers\generation\beam_search.py
+
+<div align="center">
+    <img src="./images/图片78.png" width=400/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片79.png" width=400/>
+</div>
+
+<div style="page-break-after: always;"></div>
+
+## 三、模型微调
+
+目前[MindSpore NLP Github仓 0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)已经有一个在昇腾开发板上适配的Qwen模型，本章节将介绍如何在昇腾开发板上，基于昇思对DeepSeek-R1-Distill-Qwen-1.5B模型进行LoRA微调，使得模型可以模仿《甄嬛传》中甄嬛的口吻进行对话。微调示例代码参考[此处](../code/deepseek-r1-distill-qwen-1.5b-lora.py)
+
+
+### 1. 背景介绍
+
+#### 1.1 数据集介绍
+
+本次实践使用了huanhuan数据集，该数据集从《甄嬛传》的剧本进行整理，从原始文本中提取出将我们关注的角色的对话，并形成 QA 问答对，最终整理为json格式的数据，数据样本示例如下：
+
+```text
+[
+    {
+        "instruction": "小姐，别的秀女都在求中选，唯有咱们小姐想被撂牌子，菩萨一定记得真真儿的——",
+        "input": "",
+        "output": "嘘——都说许愿说破是不灵的。"
+    },
+    {
+        "instruction": "这个温太医啊，也是古怪，谁不知太医不得皇命不能为皇族以外的人请脉诊病，他倒好，十天半月便往咱们府里跑。",
+        "input": "",
+        "output": "你们俩话太多了，我该和温太医要一剂药，好好治治你们。"
+    },
+    {
+        "instruction": "嬛妹妹，刚刚我去府上请脉，听甄伯母说你来这里进香了。",
+        "input": "",
+        "output": "出来走走，也是散心。"
+    }
+]
+```
+
+#### 1.2 LoRA微调介绍
+
+LoRA（Low-Rank Adaptation）是一种参数高效微调（Parameter-Efficient Fine-Tuning, PEFT）方法。其核心思想是冻结原始网络参数，对Attention层中QKV等模块添加旁支。旁支包含两个低维度的矩阵A和矩阵B，微调过程中仅更新A、B 矩阵。通过这种方式，显著降低计算和内存成本，同时达到与全参数微调相近的性能。
+
+<div align="center">
+    <img src="./images/1-lora.png" width=250/>
+</div>
+
+### 2. 微调实践
+
+#### 2.1 环境准备
+
+##### 2.1.1 MindSpore NLP安装
+
+打开终端，输入如下命令，从Github对MindSpore NLP 0.4分支进行源码安装：
+
+```bash
+pip uninstall mindnlp -y
+pip install git+https://github.com/mindspore-lab/mindnlp.git@0.4
+# 检查是否安装成功
+pip show mindnlp
+```
+
+如克隆遇到网络问题，可更改为以下命令：
+
+```bash
+pip uninstall mindnlp -y
+pip install git+https://gitee.com/mindspore-lab/mindnlp.git@0.4
+# 检查是否安装成功
+pip show mindnlp
+```
+
+
+##### 2.1.2 openMind Hub Client安装
+
+打开终端，输入如下命令，安装openMind Hub Client:
+```bash
+pip install openmind_hub
+```
+
+##### 2.1.3 限制python进程数
+
+因OrangePi AIpro昇腾开发板内存与显存共享，且在执行时会拉起多python进程，导致额外的内存占用，从而影响到显存。故通过配置环境变量的方式，限制python进程数，从而减少对显存的影响。
+
+打开终端，配置如下环境变量，约束限制python进程数。
+
+```bash
+export MAX_COMPILE_CORE_NUMBER=1
+export TE_PARALLEL_COMPILER=1
+```
+
+配置后可在终端输入如下命令，检查环境变量是否生效：
+
+```bash
+# 如打印结果为1，则证明环境变量生效
+echo $MAX_COMPILE_CORE_NUMBER
+# 如打印结果为1，则证明环境变量生效
+echo $TE_PARALLEL_COMPILER
+```
+
+##### 2.1.4 配置cgroup，手动限制进程最大内存占用
+
+输入如下命令，安装cgroup：
+> 此为一次性操作。
+```bash
+sudo apt-get update
+sudo apt-get install cgroup-tools
+# 检查是否安装成功
+cgcreate --help
+```
+
+配置cgroup：
+> 每次打开新终端后，执行微调代码前均需要进行改操作。
+
+```bash
+sudo cgcreate -g memory:python_limit  # 创建cgroup
+sudo cgset -r memory.limit_in_bytes=4G /python_limit  # 限制4GB内存
+sudo cgclassify -g memory:python_limit $$
+```
+
+#### 2.2 模型微调
+
+##### 2.2.1 下载数据集
+
+在示例代码`deepseek-r1-distill-qwen-1.5b-lora.py`中，我们通过openmind_hub提供的接口下载huanhuan.json数据集：
+
+```python
+# 从魔乐社区下载数据集
+om_hub_download(
+    repo_id="MindSpore-Lab/huanhuan",
+    repo_type="dataset",
+    filename="huanhuan.json",
+    local_dir="./",
+)
+```
+
+
+##### 2.2.2 执行微调
+
+微调的超参可在代码中的TrainingArguments进行配置，示例代码的超参介绍如下：
+
+```python
+args = TrainingArguments(
+    output_dir="./output/DeepSeek-R1-Distill-Qwen-1.5B",  # 输出保存路径
+    per_device_train_batch_size=1,  # batch size
+    logging_steps=1,  # 每多少步记录一次训练日志
+    num_train_epochs=1,  # epoch数
+    save_steps=3,  # 每多少步保存一次权重
+    learning_rate=1e-4,  # 学习率
+)
+```
+
+在终端输入如下命令，启动微调：
+
+```bash
+python deepseek-r1-disitll-qwen-1.5b-lora.py
+```
+
+第一次执行时，会涉及到模型预训练权重等相关文件的下载，故需要等待5-10分钟时间，下载后的文件可在同路径下的`.mindnlp/model/MindSpore-Lab/DeepSeek-R1-Distill-Qwen-1.5B-FP16`找到，后续执行无需再进行模型权重下载。
+
+微调结果输出如下图所示：
+
+![2.2.2-finetune](./images/3-finetune.png)
+
+
+##### 2.2.3 查看保存权重
+
+在2.2.2章节中，我们配置了每3步保存一次权重，在执行完微调后，可在`./output/DeepSeek-R1-Distill-Qwen-1.5B`中找到`checkpoint-3`的文件夹，内有保存微调后的LoRA adapter权重。
+
+<div align="center">
+    <img src="./images/4-adapter_model.png" width=300/>
+</div>
+
+
+##### 2.2.4 清理缓存
+
+建议在每次执行完毕后，在终端输入如下命令，清除缓存：
+
+```bash
+sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+```
+
+通过`npu-smi info`命令可发现，执行前后，显存的占用从4393下降到了1622。
+
+- 清理缓存前：
+![2.2.4-before_drop_caches](./images/6-before_drop_caches.png)
+- 清理缓存后：
+  ![2.2.4-after_drop_caches](./images/5-after_drop_caches.png)
+
+<div style="page-break-after: always;"></div>
+
+## 四、模型推理
+
+本章节将对DeepSeek-R1-Distill-Qwen-1.5B模型进行推理，推理过程将转化为一个可交互的对话机器人，以增强用户体验和实用性。推理示例代码参考[此处](../code/deepseek-r1-distill-qwen-1.5b-gradio.py)
+
+### 1. 实验环境
+
+- CANN版本: 8.1.RC1
+- MindSpore版本: 2.6.0
+- MindSpore NLP版本：[MindSpore NLP仓0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)
+- Gradio版本：4.44.0
+
+### 2. 设置环境变量并启动推理
+
+为记录推理时间，需要在代码运行前设置以下环境变量：
+```sh
+export INFERENCE_TIME_RECORD=True
+```
+启动推理
+```sh
+python deepseek-r1-distill-qwen-1.5b-gradio.py
+```
+
+代码正常运行的日志如下：
+
+![alt text](./images/3.png)
+
+### 3. 推理对话
+
+加载lora权重之前，运行代码后，在浏览器中打开127.0.0.1:7860开启对话，如下图所示：
+
+<div align="center">
+    <img src="./images/image-2.png" width=600/>
+</div>
+
+此时，从终端的运行日志可以看到，平均推理时间为0.727秒。
+<div align="center">
+    <img src="./images/image-3.png" width=550/>
+</div>
+
+
+### 4. 禁用多线程
+
+MindSpore动态图下框架存在多线程行为，而OrangePi AIpro昇腾开发板由于host侧开销导致单token推理时间较长，所以在OrangePi AIpro昇腾开发板的场景中反而使用单线程能提升性能，在代码中加入禁用多线程的指令：
+```python
+from mindspore._c_expression import disable_multi_thread
+disable_multi_thread()
+```
+再次运行代码，在浏览器中打开127.0.0.1:7860开启对话，如下图所示：
+
+<div align="center">
+    <img src="./images/image-4.png" width=500/>
+</div>
+
+应用上述改动后，平均推理时间减少至0.674秒
+<div align="center">
+    <img src="./images/image-5.png" width=470/>
+</div>
+
+
+### 5. 体验Lora微调后的效果
+
+请将`deepseek-r1-distill-qwen-1.5b-gradio.py`文件中第16行的注释取消（使用PeftModel），并修改加载adapter model的路径为微调后的`adapter_model`文件所在路径
+![alt text](./images/image-6.png)
+
+再次启动推理
+```sh
+python deepseek-r1-distill-qwen-1.5b-gradio.py
+```
+打开对话界面，即可体验Lora微调后的对话效果：
+<div align="center">
+    <img src="./images/image-8.png" width=350/>
+</div>
+<div style="page-break-after: always;"></div>
+
+## 五、推理JIT优化
+
+本章节将对DeepSeek-R1-Distill-Qwen-1.5B模型推理进一步优化，主要通过MindSpore JIT（Just-In-Time）编译技术优化DeepSeek-R1-Distill-Qwen-1.5B模型的推理性能，降低单次推理耗时，提升对话的响应速度与用户体验。JIT优化示例代码参考[此处](../code/deepseek-r1-distill-qwen-1.5b-jit.py)
+
+
+### 1. 实验环境
+
+- CANN版本: 8.1.RC1 
+- MindSpore版本: 2.6.0
+- MindSpore NLP版本：[MindSpore NLP仓0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)
+- Gradio版本：4.44.0
+
+### 2. 执行推理测试
+
+#### 2.1 推理脚本介绍
+
+本次实验使用逐token推理的方式，使用DeepSeek-R1-Distill-Qwen-1.5B模型进行文本推理。常见的`model.generate()`推理方式是在此基础上进行了多种封装和优化，此处仅包含基础的推理与Top_P、温度的参数调节，故文本生成结果可能会与使用`model.generate()`推理存在一定出入。
+
+##### 2.1.1 Top_p函数的实现
+
+```python
+def sample_top_p(probs, p=0.9):
+    """
+    Top-p采样函数，用于生成文本时选择下一个token。
+    此处优先采用基于numpy而不是原生MindSpore的实现方式，因为在昇腾开发板上运行效率更高
+    """
+    probs_np = probs.asnumpy()
+    # 按概率降序排序
+    sorted_indices = np.argsort(-probs_np, axis=-1)
+    sorted_probs = np.take_along_axis(probs_np, sorted_indices, axis=-1)
+    # 计算累积概率并创建掩码
+    cumulative_probs = np.cumsum(sorted_probs, axis=-1)
+    mask = cumulative_probs - sorted_probs > p
+    sorted_probs[mask] = 0.0
+    sorted_probs = sorted_probs / np.sum(sorted_probs, axis=-1, keepdims=True)
+    # 转换回MindSpore Tensor
+    sorted_probs_tensor = mindspore.Tensor(sorted_probs, dtype=mindspore.float32)
+    sorted_indices_tensor = mindspore.Tensor(sorted_indices, dtype=mindspore.int32)
+    next_token_idx = ops.multinomial(sorted_probs_tensor, 1)
+    batch_size = probs.shape[0]
+    batch_indices = ops.arange(0, batch_size, dtype=mindspore.int32).reshape(-1, 1)
+    # 此处采用基于mindspore.ops的实现方式，在昇腾开发板上兼容性最好（基于mindspore.mint的实现方式当前版本CANN暂不支持）
+    next_token = mindspore.ops.gather(sorted_indices_tensor, next_token_idx, axis=1, batch_dims=1)
+    # next_token = mindspore.mint.gather(sorted_indices_tensor, dim=1, index=next_token_idx)
+    return next_token
+```
+
+
+##### 2.1.2 MindSpore NLP库的修改
+
+该实验对MindSpore NLP库中的`transformers/models/qwen2/modeling_qwen2.py`进行了修改以支持静态图的运行，**[相关PR](https://github.com/mindspore-lab/mindnlp/pull/2028)已经合入MindSpore NLP的0.4分支，进行实验时无需再进行以下修改。**
+
+- modeling_qwen2.py的decoder_layer中，需添加_modules.values()
+<div align="center">
+    <img src="./images/image-modeling-1.png" width=270/>
+</div>
+
+
+- 修改`RotaryEmbedding`类以支持静态图
+<div align="center">
+    <img src="./images/image-modeling-2.png" width=450/>
+</div>
+<div align="center">
+    <img src="./images/image-modeling-3.png" width=450/>
+</div>
+
+
+#### 2.2 运行未加速的推理脚本
+进入实验目录（假设为/jit_accelerate），执行原始脚本（未启用JIT），在浏览器中打开127.0.0.1:7860开启对话：
+```bash
+cd ~/jit_accelerate
+python deepseek-r1-distill-qwen-1.5b-nojit.py
+```
+![对话网页](./images/image-gradio.png)
+同时查看终端，记录每个Token的推理耗时： 
+
+<div align="center">
+    <img src="./images/image-raw.png"/>
+</div>
+
+每个token推理时间约为1.1秒。
+
+#### 2.3 运行JIT加速的推理脚本
+
+执行启用了MindSpore JIT编译的脚本，在浏览器中打开127.0.0.1:7860开启对话，同时查看终端，对比性能提升：
+```bash
+python deepseek-r1-distill-qwen-1.5b-jit.py
+```
+脚本关键改动：
+- 设置`jit_level`优化等级为`O2`。
+- 使用`model.jit()`将全图静态图化。
+- 使用`@mindspore.jit`装饰器封装模型推理函数`get_decode_one_tokens_logits`，设置PSJit选项解析python的ast以构建静态图。该函数用于逐个token进行推理。
+
+
+输出示例：
+<div align="center">
+    <img src="./images/image-jit.png"/>
+</div>
+首token推理时间约为140秒，随后每个token推理时间约为0.27秒。
+
+### 3. 性能测试结果
+
+| 测试场景       | 首Token推理耗时 |  第二个Token起平均每Token推理耗时 |  
+|----------------|---------------------|  ---------------------|  
+| 未启用JIT      | 2.2秒             |  1.1秒             |  
+| 启用JIT        | 140秒             |  0.27秒             |  
+
+可以注意到，使用JIT加速后，单token推理速度有显著提升，但是在推理首个token前需要对全图进行编译，故首token推理时间较长。在推理token数量较多时，使用JIT优化对效率提升效果更明显。
+
+<div style="page-break-after: always;"></div>
+
+
+## 附录
+
+### 1. 报错信息汇总以及修改方案
+
+在进行[模型开发](#二-模型开发)的验证时，执行ut后可能还会遇到如下报错，下面针对每个报错进行分析修改。
+
+#### 1.1 用例test_generate_from_inputs_embeds_decoder_only报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_generate_from_inputs_embeds_decoder_only，报错信息如下：
+
+![图片51.png](./images/图片51.png)
+
+**分析：** 排除input_ids.shape包含0的情况
+
+- 修改前代码：mindnlp\transformers\models\qwen2\modeling_qwen2.py
+
+<div align="center">
+    <img src="./images/图片52.png" width=500/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片53.png" width=500/>
+</div>
+
+#### 1.2 用例test_Qwen2_token_classification_model报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_Qwen2_token_classification_model,报错信息如下：
+
+<div align="center">
+    <img src="./images/图片54.png" width=500/>
+</div>
+
+**分析：** Tensor.masked_fill(mask, value)中的value (Union[Number, Tensor]) - 用来填充的值，只支持零维Tensor或者Number。所以可以直接通过python中的float()将value的类型直接转换为number。
+
+- 修改前代码：mindnlp\transformers\models\qwen2\modeling_qwen2.py
+
+<div align="center">
+    <img src="./images/图片55.png" width=370/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片56.png" width=370/>
+</div>
+
+#### 1.3 用例test_batching_equivalence等报错
+
+> 执行用例以及对应报错信息如下：
+
+![图片57.png](./images/图片57.png)
+
+**分析：** 需要重新改写方法_prepare_4d_causal_attention_mask_with_cache_position
+
+- 修改前代码：mindnlp\transformers\models\qwen2\modeling_qwen2.py
+
+<div align="center">
+    <img src="./images/图片58.png" width=530/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片59.png" width=530/>
+</div>
+
+#### 1.4 用例test_batching_equivalence报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_batching_equivalence，报错信息如下：
+
+![图片69.png](./images/图片69.png)
+![图片70.png](./images/图片70.png)
+![图片71.png](./images/图片71.png)
+
+**分析：** 针对算子mindspore.mint.max()需要区分入参dim是否为None的不同情况
+
+- 修改前代码： \mindnlp\core\ops\reduction.py
+
+<div align="center">
+<img src='./images/图片72.png' width=370>
+</div>
+
+
+- 修改后代码：
+
+<div align="center">
+<img src='./images/图片73.png' width=370>
+</div>
+
+
+#### 1.5 用例test_constrained_beam_search_generate_dict_output报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_constrained_beam_search_generate_dict_output，报错信息如下:
+
+![图片83.png](./images/图片83.png)
+
+**分析：** 昇腾开发板上Tensor的切片赋值目前只支持直接通过mindspore.Tensor的方式
+
+- 修改前代码：mindnlp\transformers\generation\beam_search.py
+
+<div align="center">
+    <img src="./images/图片84.png" width=500/>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+    <img src="./images/图片85.png" width=500/>
+</div>
+
+#### 1.6 用例test_left_padding_compatibilit报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_left_padding_compatibilit，报错信息如下：
+
+![图片86.png](./images/图片86.png)
+
+**分析：** Tensor.cumsum => ops.cumsum(input, dim, dtype=None) , 且注意其中的input不支持int64，要通过int()转换为int32
+
+- 修改前代码：\tests\transformers\generation\test_utils.py
+
+![图片87.png](./images/图片87.png)
+
+- 修改后代码：
+
+![图片88.png](./images/图片88.png)
+
+#### 1.7 用例test_sample_generate报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_sample_generate，报错信息如下：
+
+![图片89.png](./images/图片89.png)
+
+**分析：** 对于算子ops.stack()的入参要求具有相同数据类型。
+
+- 修改前代码：\mindnlp\transformers\generation\logits_process.py
+
+![图片90.png](./images/图片90.png)
+
+- 修改后代码：
+
+![图片91.png](./images/图片91.png)
+
+
+#### 1.8 用例test_group_beam_search_generate报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_group_beam_search_generate，报错信息如下：
+
+![图片92.png](./images/图片92.png)
+
+**分析：** 对于算子ops.tensor_scatter_update()的入参要求具有相同数据类型。
+
+- 修改前代码： \mindnlp\core\ops\array.py
+
+![图片93.png](./images/图片93.png)
+
+- 修改后代码：
+
+![图片94.png](./images/图片94.png)
+
+注意同时修改 \mindnlp\core\ops\other.py
+
+- 修改前代码：
+
+<div align="center">
+<img src='./images/图片98.png' width=500>
+</div>
+
+- 修改后代码：
+
+<div align="center">
+<img src='./images/图片99.png' width=500>
+</div>
+
+#### 1.9 用例test_model_450m_logits等报错
+
+> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2IntegrationTest::test_model_450m_logits以及Qwen2IntegrationTest类中所有打标签@slow的用例时，报错信息如下：
+
+![图片95.png](./images/图片95.png)
+
+**分析：** huggingface镜像站中已经下线用例中对应的模型Qwen/Qwen2-450m-beta，参照huggingface transformers仓库中tag为v4.51.3版本中的对应用例修改为模型Qwen/Qwen2-0.5B以及相应的数据即可。
+
+- 修改前代码：
+
+<div align="center">
+    <img src="./images/图片96.png" width=1000/>
+</div>
+
+- 修改后代码：
+
+![图片97.png](./images/图片97.png)

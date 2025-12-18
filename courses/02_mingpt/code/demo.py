@@ -8,7 +8,7 @@ from mingpt.utils import set_seed
 set_seed(3407)
 
 # 是否开启同步，测试使用，使用请取消注释
-# mindspore.set_context(pynative_synchronize=True)
+mindspore.set_context(pynative_synchronize=True)
 
 class SortDataset():
     """ 

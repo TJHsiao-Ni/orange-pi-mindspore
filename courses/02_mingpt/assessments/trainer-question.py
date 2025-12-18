@@ -16,6 +16,29 @@ from mingpt.utils import CfgNode as CN
 def select(condition, input, other):
     return condition * input + (~condition) * other
 
+# 香橙派mindspore2.7.1版本没有all_finite算子，需要手动实现
+def simple_all_finite(grads):
+    """简单替换 amp.all_finite"""
+    if grads is None:
+        raise TypeError("amp.all_finite() argument must be a list or tuple of Tensors, not None")
+    
+    if not isinstance(grads, (list, tuple)):
+        raise TypeError(f"amp.all_finite() argument must be a list or tuple of Tensors, got {type(grads).__name__}")
+    
+    if len(grads) == 0:
+        raise ValueError("amp.all_finite() argument cannot be an empty list or tuple")
+    
+    for i, grad in enumerate(grads):
+        if grad is None:
+            raise TypeError(f"amp.all_finite() argument at position {i} must be a Tensor, got None")
+        if not isinstance(grad, mindspore.Tensor):
+            raise TypeError(f"amp.all_finite() argument at position {i} must be a Tensor, got {type(grad).__name__}")
+
+        if not ops.all(ops.isfinite(grad)):
+            return mindspore.Tensor(False)
+
+    return mindspore.Tensor(True)
+
 class CustomDynamicLossScaler(amp.DynamicLossScaler):
     r"""
     一个替代ops的自定义动态损失缩放器。使用自定义Select方法进行选择。
@@ -150,7 +173,7 @@ class Trainer:
             # >>>>>>> 填空4 把放大后的loss缩小回原始数值 <<<<<<<
             self.loss = _____
             
-            # >>>>>>> 填空5 判断是否有溢出，使用amp.all_finite接口 <<<<<<<
+            # >>>>>>> 填空5 判断是否有溢出，使用simple_all_finite接口 <<<<<<<
             is_finite = _____
             if is_finite:
                 unscaled_grads = loss_scaler.unscale(grads)

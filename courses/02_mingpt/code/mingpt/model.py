@@ -1,7 +1,7 @@
 import math
 import mindspore as ms
 import mindspore.nn as nn
-import mindspore.mint as mint
+from mindspore import mint, ops
 from mindspore.common.initializer import initializer, Normal, Zero, One
 from mingpt.utils import CfgNode as CN
 
@@ -312,7 +312,7 @@ class GPT(nn.Cell):
             logits = logits[:, -1, :] / temperature
             # （可选地）将对数输出值裁剪为仅前 k 个选项的值
             if top_k is not None:
-                v, _ = mint.topk(logits, top_k)
+                v, _ = ops.topk(logits, top_k)
                 logits[logits < v[:, [-1]]] = -float("Inf")
             # 应用 softmax 函数将对数输出转换为（归一化的）概率值
             probs = mint.nn.functional.softmax(logits, dim=-1)
@@ -320,7 +320,7 @@ class GPT(nn.Cell):
             if do_sample:
                 idx_next = mint.multinomial(probs, num_samples=1)
             else:
-                _, idx_next = mint.topk(probs, k=1, dim=-1)
+                _, idx_next = ops.topk(probs, k=1, dim=-1)
             # 将采样的索引添加到运行序列中，并继续进行
             idx = mint.cat((idx, idx_next.to(idx.dtype)), dim=1)
 
