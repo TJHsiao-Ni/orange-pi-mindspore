@@ -1,6 +1,6 @@
 # <center>昇思+昇腾开发板：</center>
 
-# <center>软硬结合玩转DeepSeek开发实战</center>
+# <center>软硬结合玩转DeepSeek蒸馏模型开发实战</center>
 
 本教程将介绍如何在以香橙派为代表的昇腾开发板上，使用DeepSeek-R1-Distill-Qwen-1.5B模型，基于昇思MindSpore进行动态图开发，包括环境准备、模型开发、模型微调、模型推理、推理性能优化全流程。
 
@@ -32,9 +32,9 @@
 
 ## 一. 环境准备
 
-首先是环境准备，本章节将介绍如何在OrangePi AIpro-20t上烧录镜像，通过PC远程连接昇腾开发板配置运行环境，并自定义安装CANN和MindSpore。
+首先是环境准备，本章节将介绍如何在OrangePi AIpro(20T)开发板上进行环境准备，涵盖镜像烧录、CANN与MindSpore版本核验及安装、虚拟内存（Swap）分区配置、Gradio及相关依赖安装。
 
-- 开发板：OrangePi AI pro-20T
+- 开发板：OrangePi AIpro(20T)
 - 操作系统镜像：opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz 
 - Python：3.9
 - CANN：8.1RC1 
@@ -46,7 +46,7 @@
 - 硬件：昇腾开发板、PC（个人笔记本电脑）、电源线、HDMI线、显示器、鼠标、键盘、读卡器、USB Type-C 数据线（可选）
 - 软件：balenaEtcher制卡工具、Vscode、MobaXterm（可选）
 
-OrangePi AIpro-20t规格昇腾开发板参考图：
+OrangePi AIpro(20T)规格昇腾开发板参考图：
 <div align="center">
 	<img src="./images/image_1_1.png" width="500" />
 </div>
@@ -55,27 +55,27 @@ OrangePi AIpro-20t规格昇腾开发板参考图：
 
 请参考[昇思官网香橙派环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.6.0/orange_pi/environment_setup.html)
 
-OrangePi AIpro-20t规格昇腾开发板镜像下载请看[此链接](http://www.orangepi.cn/html/hardWare/computerAndMicrocontrollers/service-and-support/Orange-Pi-AIpro-20T.html)，使用镜像：`opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz`
+OrangePi AIpro(20T)规格昇腾开发板镜像下载请看[此链接](http://www.orangepi.cn/html/hardWare/computerAndMicrocontrollers/service-and-support/Orange-Pi-AIpro-20T.html)，使用镜像：`opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz`
 
-### 2. Swap检查与配置
+### 2. Swap分区检查与配置
 
-因为本实验需要的内存较大，请设置16G大小的Swap，否则在运行过程中可能会出现内存不足的情况。
+因为本实验需要的内存较大，建议配置16G大小的Swap分区，否则在运行过程中可能会出现内存不足的情况。
 
-打开终端，输入如下命令，检查Swap是否开启：
+打开终端，输入如下命令，检查是否已配置Swap分区：
 
 ```bash
-# 使用下列命令查看Swap大小，如已配置16G Swap，则无需再次配置
+# 执行以下命令查看Swap分区大小，如显示已配置16G Swap分区，无需进行额外操作
 free -m
 ```
 
 正确输出结果为：
 ![image_1_2_swap](./images/image_1_2_swap.png)
 
-如输出的结果中Swap部分为0，则可在终端中输入如下命令，配置Swap:
+如输出的结果中Swap部分为0，则可在终端中输入如下命令，配置Swap分区:
 > 此为一次性操作。
 
 ```bash
-# 以下命令配置swap 16G，sudo密码为Mind@123
+# 以下命令配置16G Swap分区，sudo密码为Mind@123
 sudo fallocate -l 16G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
@@ -96,10 +96,16 @@ pip install gradio==4.44.0
 
 ## 二. 模型开发
 
-本章节将介绍已在云侧完成适配的前提下，如何在香橙派开发板上适配Qwen2模型。
+DeepSeek-R1-Distill-Qwen系列模型由Qwen2蒸馏裁剪生成，在云侧适配已落地的基础上，本章节将专门讲解Qwen2模型面向开发板的适配部署流程。
 
-当前MindSpore NLP 0.4分支已经支持Qwen2模型，模型位于mindnlp/transformers/models/qwen2目录下。**如开发者想体验在开发板上的模型适配过程，可从MindSpore NLP 0.4.1的tag拉取代码，如果想直接从模型微调推理入手实践，可以跳过本章节。**
+当前MindSpore NLP 0.4分支已完成了Qwen2模型在昇腾开发板的适配，模型源码位于`mindnlp/transformers/models/qwen2`目录。
 
+1. 如开发者希望直接体验模型在开发板上的微调、推理与性能优化，可直接跳转至[**模型微调**](#三-模型微调)章节，直接从源码编译安装0.4分支的MindSpore NLP；
+2. 如开发者希望实操Qwen2模型的开发板适配流程，掌握常见问题的解决方案，可基于MindSpore NLP 0.4.1版本拉取代码，参考以下步骤实践：
+   - 安装MindSpore NLP
+   - 执行UT验证
+   - 分析并解决验证报错
+   - 完成全部UT测试，即表示开发适配成功
 
 ### 1. 验证环境准备
 
@@ -115,14 +121,21 @@ git clone -b v0.4.1 https://github.com/mindspore-lab/mindnlp.git
 git clone -b v0.4.1 https://gitee.com/mindspore-lab/mindnlp.git
 ```
 
-依赖安装
+进入mindnlp目录，安装依赖
 
 ```bash
+cd mindnlp
 pip install -r requirements/requirements.txt
 ```
 
 
 ### 2. 执行ut进行验证
+
+为了精准验证, 在文件tests/transformers/models/qwen2/test_modeling_qwen2.py的import mindspore之后的位置，加入如下代码
+
+```bash
+mindspore.set_context(pynative_synchronize=True)
+```
 
 设置环境变量：
 
@@ -134,12 +147,6 @@ export RUN_SLOW=True
 
 ```bash
 pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
-```
-
-出现报错不准的时候, 为了精准定位, 在文件tests/transformers/models/qwen2/test_modeling_qwen2.py的import mindspore之后的位置，加入如下代码，重新跑pytest，查看具体的报错位置并根据报错信息修改
-
-```bash
-mindspore.set_context(pynative_synchronize=True)
 ```
 
 ### 3. 报错分析

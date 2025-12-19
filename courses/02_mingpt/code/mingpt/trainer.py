@@ -16,7 +16,7 @@ from mingpt.utils import CfgNode as CN
 def select(condition, input, other):
     return condition * input + (~condition) * other
 
-# 香橙派mindspore2.7.1版本没有all_finite算子，需要手动实现
+# CANN8.3RC1在310上不支持allfinite算子，需要手动实现
 def simple_all_finite(grads):
     """简单替换 amp.all_finite"""
     if grads is None:
