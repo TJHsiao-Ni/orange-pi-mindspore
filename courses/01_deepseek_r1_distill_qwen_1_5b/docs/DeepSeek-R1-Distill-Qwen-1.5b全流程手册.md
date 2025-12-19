@@ -33,10 +33,17 @@
 ## 一. 环境准备
 
 首先是环境准备，本章节将介绍如何在OrangePi AIpro-20t上烧录镜像，通过PC远程连接昇腾开发板配置运行环境，并自定义安装CANN和MindSpore。
+- 开发板：OrangePi AI pro-20T
+- 操作系统镜像：opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz 
+- Python：3.9
+- CANN：8.1RC1 
+-  MindSpore：2.6.0
+-  MindSpore NLP：0.4分支（源码安装）
+
 
 本章节所需的软/硬件如下：
 
-- 硬件：OrangePi AIpro-20t规格昇腾开发板、PC（个人笔记本电脑）、电源线、HDMI线、显示器、鼠标、键盘、读卡器、USB Type-C 数据线（可选）
+- 硬件：昇腾开发板、PC（个人笔记本电脑）、电源线、HDMI线、显示器、鼠标、键盘、读卡器、USB Type-C 数据线（可选）
 - 软件：balenaEtcher制卡工具、Vscode、MobaXterm（可选）
 
 OrangePi AIpro-20t规格昇腾开发板参考图：
@@ -47,6 +54,8 @@ OrangePi AIpro-20t规格昇腾开发板参考图：
 ### 1. 镜像烧录及CANN和MindSpore的升级
 
 请参考[昇思官网香橙派环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.6.0/orange_pi/environment_setup.html)
+
+OrangePi AIpro-20t规格昇腾开发板镜像下载请看[此链接](http://www.orangepi.cn/html/hardWare/computerAndMicrocontrollers/service-and-support/Orange-Pi-AIpro-20T.html)，使用镜像：`opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz`
 
 ### 2. Swap检查与配置
 
