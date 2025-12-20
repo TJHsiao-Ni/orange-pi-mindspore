@@ -135,7 +135,7 @@ def generate_completion(prompt: str) -> str:
     generated_ids[:, seq_length] = next_token[:, 0]
 
     # 自回归生成循环
-    cache_position = mindspore.tensor([seq_length + 1])
+    cache_position = mindspore.tensor([seq_length])
     partial_message = ""
     for step in range(1, NUM_TOKENS_TO_GENERATE):
         t_start = time.time()
@@ -143,8 +143,9 @@ def generate_completion(prompt: str) -> str:
             model, next_token, None, cache_position, past_key_values,
             temperature=TEMPERATURE, top_p=TOP_P
         )
-        generated_ids[:, cache_position] = next_token.int()
         cache_position += 1
+        generated_ids[:, cache_position] = next_token.int()
+       
         t_elapsed = time.time() - t_start
         print(f"[Token {step:02d}] {t_elapsed:.4f}s")  # 打印单步生成耗时
 

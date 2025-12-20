@@ -4,27 +4,42 @@
 
 本教程将介绍如何在以香橙派为代表的昇腾开发板上，使用DeepSeek-R1-Distill-Qwen-1.5B模型，基于昇思MindSpore进行动态图开发，包括环境准备、模型开发、模型微调、模型推理、推理性能优化全流程。
 
+**代码目录:**
+
+```
+01_deepseek_r1_distill_qwen_1_5b/
+├── assessments/
+│    ├── beginner_assessment.ipynb     # 开发板初级能力认证知识点考察代码（填空）
+│    └── intermediate_assessment.ipynb # 开发板中级能力认证知识点考察代码（填空）
+├── code
+│    ├── deepseek-r1-distill-qwen-1.5b-gradio.py # 基于Gradio的模型推理界面
+│    ├── deepseek-r1-distill-qwen-1.5b-jit.py    # 基于Gradio的模型推理界面（jit优化）
+│    ├── deepseek-r1-distill-qwen-1.5b-lora.py   # 基于LoRA的模型微调
+├── docs
+│    ├── images/
+│    ├── 昇思+昇腾开发板：软硬结合玩转DeepSeek蒸馏模型开发实战.pdf  # 本章内容课件
+└──  └── DeepSeek-R1-Distill-Qwen-1.5b全流程手册.md           # 本章内容手册
+```
+**手册目录:**
 - [环境准备](#一-环境准备)
   - [镜像烧录及CANN和MindSpore的升级](#1-镜像烧录及cann和mindspore的升级)
-  - [Swap检查与配置](#2-swap检查与配置)
-  - [Gradio安装](#3-gradio安装)
+  - [Gradio安装](#2-gradio安装)
 - [模型开发](#二-模型开发)
-    - [验证环境准备](#1-验证环境准备)
+    - [环境准备](#1-环境准备)
     - [执行ut进行验证](#2-执行ut进行验证)
     - [报错分析](#3-报错分析) 
 - [模型微调](#三-模型微调)
-  - [背景介绍](#1-背景介绍)
-  - [微调实践](#2-微调实践)
+  - [数据集介绍](#1-数据集介绍)
+  - [环境准备](#2-环境准备)
+  - [模型微调](#3-模型微调)
 - [模型推理](#四-模型推理)
   - [实验环境](#1-实验环境)
-  - [设置环境变量并启动推理](#2-设置环境变量并启动推理)
-  - [推理对话](#3-推理对话)
-  - [禁用多线程](#4-禁用多线程)
-  - [体验Lora微调后的效果](#5-体验lora微调后的效果)
+  - [加载预训练权重推理](#2-加载预训练权重推理)
+  - [禁用多线程](#3-禁用多线程)
+  - [加载LoRA权重推理](#4-加载LoRA权重推理)
 - [推理jit优化](#五-推理jit优化)
   - [实验环境](#1-实验环境-1)
   - [执行推理测试](#2-执行推理测试)
-  - [性能测试结果](#3-性能测试结果)
 - [附录](#附录)
   - [报错信息汇总以及修改方案](#1-报错信息汇总以及修改方案)
 
@@ -38,7 +53,7 @@
 - 操作系统镜像：opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz 
 - Python：3.9
 - CANN：8.1RC1 
--  MindSpore：2.6.0
+-  MindSpore：2.5.0
 -  MindSpore NLP：0.4分支（源码安装）
 
 本章节所需的软/硬件如下：
@@ -53,38 +68,13 @@ OrangePi AIpro(20T)规格昇腾开发板参考图：
 
 ### 1. 镜像烧录及CANN和MindSpore的升级
 
-请参考[昇思官网香橙派环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.6.0/orange_pi/environment_setup.html)
+请参考[昇思官网香橙派环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.5.0/orange_pi/environment_setup.html)
 
 OrangePi AIpro(20T)规格昇腾开发板镜像下载请看[此链接](http://www.orangepi.cn/html/hardWare/computerAndMicrocontrollers/service-and-support/Orange-Pi-AIpro-20T.html)，使用镜像：`opiaipro_20t_ubuntu22.04_desktop_aarch64_20250211.img.xz`
 
-### 2. Swap分区检查与配置
 
-因为本实验需要的内存较大，建议配置16G大小的Swap分区，否则在运行过程中可能会出现内存不足的情况。
 
-打开终端，输入如下命令，检查是否已配置Swap分区：
-
-```bash
-# 执行以下命令查看Swap分区大小，如显示已配置16G Swap分区，无需进行额外操作
-free -m
-```
-
-正确输出结果为：
-![image_1_2_swap](./images/image_1_2_swap.png)
-
-如输出的结果中Swap部分为0，则可在终端中输入如下命令，配置Swap分区:
-> 此为一次性操作。
-
-```bash
-# 以下命令配置16G Swap分区，sudo密码为Mind@123
-sudo fallocate -l 16G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-完成配置后可再通过`free -m`检查配置是否生效。
-
-### 3. Gradio安装
+### 2. Gradio安装
 
 打开终端，输入如下命令，安装Gradio 4.44.0
 ```bash
@@ -96,42 +86,28 @@ pip install gradio==4.44.0
 
 ## 二. 模型开发
 
-DeepSeek-R1-Distill-Qwen系列模型由Qwen2蒸馏裁剪生成，在云侧适配已落地的基础上，本章节将专门讲解Qwen2模型面向开发板的适配部署流程。
+DeepSeek-R1-Distill-Qwen系列模型由Qwen2蒸馏裁剪生成，在云侧适配完成的基础上，本章节介绍模型在开发板上适配流程、常见问题及解决方案，为开发者适配其他模型提供借鉴。
 
-当前MindSpore NLP 0.4分支已完成了Qwen2模型在昇腾开发板的适配，模型源码位于`mindnlp/transformers/models/qwen2`目录。
+**当前MindSpore NLP 0.4分支已完成了Qwen2模型在昇腾开发板的适配，模型源码位于`mindnlp/transformers/models/qwen2`目录。**
 
-1. 如开发者希望直接体验模型在开发板上的微调、推理与性能优化，可直接跳转至[**模型微调**](#三-模型微调)章节，直接从源码编译安装0.4分支的MindSpore NLP；
-2. 如开发者希望实操Qwen2模型的开发板适配流程，掌握常见问题的解决方案，可基于MindSpore NLP 0.4.1版本拉取代码，参考以下步骤实践：
-   - 安装MindSpore NLP
-   - 执行UT验证
-   - 分析并解决验证报错
-   - 完成全部UT测试，即表示开发适配成功
+1. 如开发者希望直接体验模型在开发板上的微调、推理与性能优化，可直接跳转至[**模型微调**](#三-模型微调)章节，直接从源码安装0.4分支的MindSpore NLP；
+2. 如开发者希望学习模型在开发板的适配流程，掌握常见问题的解决方案，可阅读本节剩余内容。
 
-### 1. 验证环境准备
+### 1. 环境准备
 
-将MindSpore NLP v0.4.1 Tag克隆到本地：
+克隆MindSpore NLP并安装相关依赖:
 
 ```bash
-git clone -b v0.4.1 https://github.com/mindspore-lab/mindnlp.git 
-```
-
-如克隆遇到网络问题，可更改为以下命令：
-
-```bash
-git clone -b v0.4.1 https://gitee.com/mindspore-lab/mindnlp.git
-```
-
-进入mindnlp目录，安装依赖
-
-```bash
+git clone https://github.com/mindspore-lab/mindnlp.git 
+# 如克隆遇到网络问题，可更改为以下命令：
+# git clone https://gitee.com/mindspore-lab/mindnlp.git
 cd mindnlp
 pip install -r requirements/requirements.txt
 ```
 
-
 ### 2. 执行ut进行验证
 
-为了精准验证, 在文件tests/transformers/models/qwen2/test_modeling_qwen2.py的import mindspore之后的位置，加入如下代码
+为方便问题定位, 在文件tests/transformers/models/qwen2/test_modeling_qwen2.py的`import mindspore`之后的位置，加入如下代码
 
 ```bash
 mindspore.set_context(pynative_synchronize=True)
@@ -143,19 +119,19 @@ mindspore.set_context(pynative_synchronize=True)
 export RUN_SLOW=True
 ```
 
-执行命令：
+执行用例（以qwen2为例）：
 
 ```bash
 pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
 ```
 
-### 3. 报错分析
+### 3. 常见报错分析
 
-在执行ut后可能会遇到报错，下面针对三个典型的报错进行分析修改，其他具体报错汇总详见[附录](#附录)。
+在执行ut后可能会遇到报错，下面针对在Qwen2模型适配中三个典型的报错进行分析并给出修改步骤，其他具体报错汇总详见[附录](#附录)。
 
 #### 3.1 针对算子缺失报错进行分析处理
 
-> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_new_cache_format_0，报错信息如下：
+> 测试用例tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_new_cache_format_0的报错信息如下：
 
 ![image_2_1.png](./images/image_2_1.png)
 
@@ -172,7 +148,7 @@ pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
 
 #### 3.2 针对损失函数报错进行分析处理
 
-> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_Qwen2_sequence_classification_model，报错信息如下：
+> 测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_Qwen2_sequence_classification_model的报错信息如下：
 
 ![image_2_4.png](./images/image_2_4.png)
 
@@ -192,7 +168,7 @@ pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
 
 #### 3.3 针对香橙派上Tensor索引/切片报错进行分析处理
 
-> 执行测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_beam_search_generate_dict_outputs_use_cache，报错信息如下：
+> 测试用例pytest -s -v tests\transformers\models\qwen2\test_modeling_qwen2.py::Qwen2ModelTest::test_beam_search_generate_dict_outputs_use_cache的报错信息如下：
 
 <div align="center">
     <img src="./images/image_2_7.png" width=550/>
@@ -216,12 +192,10 @@ pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
 
 ## 三. 模型微调
 
-目前[MindSpore NLP Github仓 0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)已经有一个在昇腾开发板上适配的Qwen模型，本章节将介绍如何在昇腾开发板上，基于昇思对DeepSeek-R1-Distill-Qwen-1.5B模型进行LoRA微调，使得模型可以模仿《甄嬛传》中甄嬛的口吻进行对话。微调示例代码参考[此处](../code/deepseek-r1-distill-qwen-1.5b-lora.py)
+目前[MindSpore NLP仓0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)已在昇腾开发板上适配了Qwen2模型，本章节介绍如何在昇腾开发板上，基于MindSpore对DeepSeek-R1-Distill-Qwen-1.5B模型进行LoRA微调，使得模型可以模仿《甄嬛传》中甄嬛的口吻进行对话。微调示例代码参考[此处](../code/deepseek-r1-distill-qwen-1.5b-lora.py)
 
 
-### 1. 背景介绍
-
-#### 1.1 数据集介绍
+### 1. 数据集介绍
 
 本次实践使用了huanhuan数据集，该数据集从《甄嬛传》的剧本进行整理，从原始文本中提取出将我们关注的角色的对话，并形成 QA 问答对，最终整理为json格式的数据，数据样本示例如下：
 
@@ -245,21 +219,13 @@ pytest -v -s tests/transformers/models/qwen2/test_modeling_qwen2.py
 ]
 ```
 
-#### 1.2 LoRA微调介绍
 
-LoRA（Low-Rank Adaptation）是一种参数高效微调（Parameter-Efficient Fine-Tuning, PEFT）方法。其核心思想是冻结原始网络参数，对Attention层中QKV等模块添加旁支。旁支包含两个低维度的矩阵A和矩阵B，微调过程中仅更新A、B 矩阵。通过这种方式，显著降低计算和内存成本，同时达到与全参数微调相近的性能。
 
-<div align="center">
-    <img src="./images/image_3_1_lora.png" width=250/>
-</div>
+### 2 环境准备
 
-### 2. 微调实践
+#### 2.1 MindSpore NLP安装
 
-#### 2.1 环境准备
-
-##### 2.1.1 MindSpore NLP安装
-
-打开终端，输入如下命令，从Github对MindSpore NLP 0.4分支进行源码安装：
+打开终端，输入如下命令，从Github对MindSpore NLP 0.4分支进行**源码安装**：
 
 ```bash
 pip uninstall mindnlp -y
@@ -278,14 +244,14 @@ pip show mindnlp
 ```
 
 
-##### 2.1.2 openMind Hub Client安装
+#### 2.2 openMind Hub Client安装
 
 打开终端，输入如下命令，安装openMind Hub Client:
 ```bash
 pip install openmind_hub
 ```
 
-##### 2.1.3 限制python进程数
+#### 2.3 限制python进程数
 
 因OrangePi AIpro昇腾开发板内存与显存共享，且在执行时会拉起多python进程，导致额外的内存占用，从而影响到显存。故通过配置环境变量的方式，限制python进程数，从而减少对显存的影响。
 
@@ -305,29 +271,9 @@ echo $MAX_COMPILE_CORE_NUMBER
 echo $TE_PARALLEL_COMPILER
 ```
 
-##### 2.1.4 配置cgroup，手动限制进程最大内存占用
+### 3 模型微调
 
-输入如下命令，安装cgroup：
-> 此为一次性操作。
-```bash
-sudo apt-get update
-sudo apt-get install cgroup-tools
-# 检查是否安装成功
-cgcreate --help
-```
-
-配置cgroup：
-> 每次打开新终端后，执行微调代码前均需要进行改操作。
-
-```bash
-sudo cgcreate -g memory:python_limit  # 创建cgroup
-sudo cgset -r memory.limit_in_bytes=4G /python_limit  # 限制4GB内存
-sudo cgclassify -g memory:python_limit $$
-```
-
-#### 2.2 模型微调
-
-##### 2.2.1 下载数据集
+#### 3.1 下载数据集
 
 在示例代码`deepseek-r1-distill-qwen-1.5b-lora.py`中，我们通过openmind_hub提供的接口下载huanhuan.json数据集：
 
@@ -342,7 +288,7 @@ om_hub_download(
 ```
 
 
-##### 2.2.2 执行微调
+#### 3.2 执行微调
 
 微调的超参可在代码中的TrainingArguments进行配置，示例代码的超参介绍如下：
 
@@ -360,7 +306,7 @@ args = TrainingArguments(
 在终端输入如下命令，启动微调：
 
 ```bash
-python deepseek-r1-disitll-qwen-1.5b-lora.py
+python deepseek-r1-distill-qwen-1.5b-lora.py
 ```
 
 第一次执行时，会涉及到模型预训练权重等相关文件的下载，故需要等待5-10分钟时间，下载后的文件可在同路径下的`.mindnlp/model/MindSpore-Lab/DeepSeek-R1-Distill-Qwen-1.5B-FP16`找到，后续执行无需再进行模型权重下载。
@@ -370,16 +316,16 @@ python deepseek-r1-disitll-qwen-1.5b-lora.py
 ![image_3_2_finetune](./images/image_3_2_finetune.png)
 
 
-##### 2.2.3 查看保存权重
+#### 3.3 查看保存权重
 
-在2.2.2章节中，我们配置了每3步保存一次权重，在执行完微调后，可在`./output/DeepSeek-R1-Distill-Qwen-1.5B`中找到`checkpoint-3`的文件夹，内有保存微调后的LoRA adapter权重。
+在[执行微调](#32-执行微调)章节中，我们配置了每3步保存一次权重，在执行完微调后，可在`./output/DeepSeek-R1-Distill-Qwen-1.5B`中找到`checkpoint-3`的文件夹，内有保存微调后的LoRA adapter权重。
 
 <div align="center">
     <img src="./images/image_3_3_adapter_model.png" width=300/>
 </div>
 
 
-##### 2.2.4 清理缓存
+#### 3.4 清理缓存
 
 建议在每次执行完毕后，在终端输入如下命令，清除缓存：
 
@@ -403,11 +349,11 @@ sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 ### 1. 实验环境
 
 - CANN版本: 8.1.RC1
-- MindSpore版本: 2.6.0
+- MindSpore版本: 2.5.0
 - MindSpore NLP版本：[MindSpore NLP仓0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)
 - Gradio版本：4.44.0
 
-### 2. 设置环境变量并启动推理
+### 2. 加载预训练权重推理
 
 为记录推理时间，需要在代码运行前设置以下环境变量：
 ```sh
@@ -422,9 +368,7 @@ python deepseek-r1-distill-qwen-1.5b-gradio.py
 
 ![image_4_1](./images/image_4_1.png)
 
-### 3. 推理对话
-
-加载lora权重之前，运行代码后，在浏览器中打开127.0.0.1:7860开启对话，如下图所示：
+运行代码后，在浏览器中打开127.0.0.1:7860开启对话，如下图所示：
 
 <div align="center">
     <img src="./images/image_4_2.png" width=600/>
@@ -436,7 +380,7 @@ python deepseek-r1-distill-qwen-1.5b-gradio.py
 </div>
 
 
-### 4. 禁用多线程
+### 3. 禁用多线程
 
 MindSpore动态图下框架存在多线程行为，而OrangePi AIpro昇腾开发板由于host侧开销导致单token推理时间较长，所以在OrangePi AIpro昇腾开发板的场景中反而使用单线程能提升性能，在代码中加入禁用多线程的指令：
 ```python
@@ -455,20 +399,16 @@ disable_multi_thread()
 </div>
 
 
-### 5. 体验Lora微调后的效果
+### 4. 加载LoRA权重推理
 
-请将`deepseek-r1-distill-qwen-1.5b-gradio.py`文件中第16行的注释取消（使用PeftModel），并修改加载adapter model的路径为微调后的`adapter_model`文件所在路径
+因示例实验只微调了3个iteration，无法直观看出微调后效果，本环节旨在说明如何更换微调后的LoRA权重进行推理:  将`deepseek-r1-distill-qwen-1.5b-gradio.py`文件中第16行的注释取消（使用PeftModel），并修改加载adapter model的路径为微调后的`adapter_model`文件所在路径:
 ![image_4_6](./images/image_4_6.png)
 
 再次启动推理
 ```sh
 python deepseek-r1-distill-qwen-1.5b-gradio.py
 ```
-打开对话界面，即可体验Lora微调后的对话效果：
-<div align="center">
-    <img src="./images/image_4_7.png" width=350/>
-</div>
-<div style="page-break-after: always;"></div>
+打开对话界面，即可体验Lora微调后的对话效果。
 
 ## 五. 推理JIT优化
 
@@ -478,7 +418,7 @@ python deepseek-r1-distill-qwen-1.5b-gradio.py
 ### 1. 实验环境
 
 - CANN版本: 8.1.RC1 
-- MindSpore版本: 2.6.0
+- MindSpore版本: 2.5.0
 - MindSpore NLP版本：[MindSpore NLP仓0.4分支](https://github.com/mindspore-lab/mindnlp/tree/0.4)
 - Gradio版本：4.44.0
 
@@ -537,22 +477,8 @@ def sample_top_p(probs, p=0.9):
 </div>
 
 
-#### 2.2 运行未加速的推理脚本
-进入实验目录（假设为/jit_accelerate），执行原始脚本（未启用JIT），在浏览器中打开127.0.0.1:7860开启对话：
-```bash
-cd ~/jit_accelerate
-python deepseek-r1-distill-qwen-1.5b-nojit.py
-```
-![对话网页](./images/image_5_4_gradio.png)
-同时查看终端，记录每个Token的推理耗时： 
 
-<div align="center">
-    <img src="./images/image_5_5_raw.png"/>
-</div>
-
-每个token推理时间约为1.1秒。
-
-#### 2.3 运行JIT加速的推理脚本
+#### 2.2 运行JIT加速的推理脚本
 
 执行启用了MindSpore JIT编译的脚本，在浏览器中打开127.0.0.1:7860开启对话，同时查看终端，对比性能提升：
 ```bash
@@ -569,14 +495,6 @@ python deepseek-r1-distill-qwen-1.5b-jit.py
     <img src="./images/image_5_6_jit.png"/>
 </div>
 首token推理时间约为140秒，随后每个token推理时间约为0.27秒。
-
-### 3. 性能测试结果
-
-| 测试场景       | 首Token推理耗时 |  第二个Token起平均每Token推理耗时 |  
-|----------------|---------------------|  ---------------------|  
-| 未启用JIT      | 2.2秒             |  1.1秒             |  
-| 启用JIT        | 140秒             |  0.27秒             |  
-
 可以注意到，使用JIT加速后，单token推理速度有显著提升，但是在推理首个token前需要对全图进行编译，故首token推理时间较长。在推理token数量较多时，使用JIT优化对效率提升效果更明显。
 
 <div style="page-break-after: always;"></div>
