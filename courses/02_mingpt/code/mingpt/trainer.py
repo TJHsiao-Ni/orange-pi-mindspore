@@ -16,6 +16,29 @@ from mingpt.utils import CfgNode as CN
 def select(condition, input, other):
     return condition * input + (~condition) * other
 
+# CANN8.3RC1在310上不支持allfinite算子，需要手动实现
+def simple_all_finite(grads):
+    """简单替换 amp.all_finite"""
+    if grads is None:
+        raise TypeError("amp.all_finite() argument must be a list or tuple of Tensors, not None")
+    
+    if not isinstance(grads, (list, tuple)):
+        raise TypeError(f"amp.all_finite() argument must be a list or tuple of Tensors, got {type(grads).__name__}")
+    
+    if len(grads) == 0:
+        raise ValueError("amp.all_finite() argument cannot be an empty list or tuple")
+    
+    for i, grad in enumerate(grads):
+        if grad is None:
+            raise TypeError(f"amp.all_finite() argument at position {i} must be a Tensor, got None")
+        if not isinstance(grad, mindspore.Tensor):
+            raise TypeError(f"amp.all_finite() argument at position {i} must be a Tensor, got {type(grad).__name__}")
+
+        if not ops.all(ops.isfinite(grad)):
+            return mindspore.Tensor(False)
+
+    return mindspore.Tensor(True)
+
 class CustomDynamicLossScaler(amp.DynamicLossScaler):
     r"""
     一个替代ops的自定义动态损失缩放器。使用自定义Select方法进行选择。
@@ -51,7 +74,7 @@ class CustomDynamicLossScaler(amp.DynamicLossScaler):
                                            scale_mul_factor,self.scale_value),self.scale_value),
                                            ops.maximum(one,self.scale_value / self.scale_factor))
         ops.assign(self.scale_value, scale_value)
-        counter = ((self.counter + 1) % self.scale_window) * grads_finite
+        counter = ops.remainder((self.counter + 1), self.scale_window) * grads_finite
 
         ops.assign(self.counter, counter)
         
@@ -148,7 +171,7 @@ class Trainer:
             self.loss = loss_scaler.unscale(loss)
             
             # 判断是否有溢出
-            is_finite = amp.all_finite(grads)
+            is_finite = simple_all_finite(grads)
             if is_finite:
                 unscaled_grads = loss_scaler.unscale(grads)
                 unscaled_grads = clip_by_norm(unscaled_grads, config.grad_norm_clip) # 梯度裁剪
